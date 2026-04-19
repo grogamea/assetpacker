@@ -46,6 +46,21 @@ class DependencyGraph:
             queue.extend(self._rdeps.get(node, set()))
         return sorted(visited)
 
+    def has_cycle(self) -> bool:
+        """Return True if the dependency graph contains a cycle."""
+        # Kahn's algorithm: repeatedly remove nodes with no dependencies.
+        in_degree: Dict[str, int] = {a: len(self._deps.get(a, set())) for a in self.all_assets()}
+        queue = [a for a, d in in_degree.items() if d == 0]
+        visited_count = 0
+        while queue:
+            node = queue.pop()
+            visited_count += 1
+            for dependent in self._rdeps.get(node, set()):
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    queue.append(dependent)
+        return visited_count != len(in_degree)
+
 
 def build_graph_from_manifest(manifest) -> DependencyGraph:
     graph = DependencyGraph()
