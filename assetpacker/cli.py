@@ -1,68 +1,86 @@
 """CLI entry point for assetpacker."""
 
+from __future__ import annotations
+
 import argparse
 import sys
+from pathlib import Path
 
 from assetpacker.config import load_config
+from assetpacker.scanner import scan_directory
 from assetpacker.optimizer import optimize
 from assetpacker.packer import pack
-from assetpacker.scanner import scan_directory
+from assetpacker.reporter import BuildReport
+from assetpacker.watcher import watch, WatchEvent
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assetpacker",
-        description="Bundle and optimize game assets for web and desktop exports.",
+        description="Bundle and optimize game assets.",
     )
-    parser.add_argument("--config", default="assetpacker.toml", help="Path to config file")
-    subparsers = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command")
 
-    scan_p = subparsers.add_parser("scan", help="Scan asset directory and print manifest")
-    scan_p.add_argument("directory", help="Directory to scan")
+    scan_p = sub.add_parser("scan", help="Scan asset directory")
+    scan_p.add_argument("path", type=Path)
 
-    build_p = subparsers.add_parser("build", help="Optimize and pack assets")
-    build_p.add_argument("directory", help="Directory to scan")
-    build_p.add_argument(
-        "--format", choices=["zip", "folder"], default="zip",
-        help="Output bundle format"
-    )
+    build_p = sub.add_parser("build", help="Build asset bundle")
+    build_p.add_argument("--config", type=Path, default=Path("assetpacker.toml"))
+
+    watch_p = sub.add_parser("watch", help="Watch for changes and rebuild")
+    watch_p.add_argument("path", type=Path)
+    watch_p.add_argument("--config", type=Path, default=Path("assetpacker.toml"))
+    watch_p.add_argument("--interval", type=float, default=1.0)
+
     return parser
 
 
-def cmd_scan(args) -> int:
-    manifest = scan_directory(args.directory)
+def cmd_scan(args: argparse.Namespace) -> None:
+    manifest = scan_directory(args.path)
     print(manifest.summary())
-    return 0
 
 
-def cmd_build(args) -> int:
+def cmd_build(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    config.bundle_format = args.format
-    manifest = scan_directory(args.directory)
-    print(f"Scanned {len(manifest.all_assets())} assets.")
-    summary = optimize(manifest, config)
-    print(f"Optimized {len(summary.results)} assets — "
-          f"saved {summary.total_savings_bytes} bytes.")
-    result = pack(summary, config)
-    if not result.success:
-        for err in result.errors:
-            print(f"[error] {err}", file=sys.stderr)
-        return 1
-    print(f"Packed {result.files_packed} files → {result.output_path} "
-          f"({result.bundle_size_kb:.1f} KB)")
-    return 0
+    manifest = scan_directory(Path(config.source_dir))
+    opt_summary = optimize(manifest, config)
+    result = pack(opt_summary, config)
+    report = BuildReport(opt_summary, result)
+    print(report.to_json())
 
 
-def main() -> None:
+def cmd_watch(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    print(f"Watching {args.path} every {args.interval}s …")
+
+    def on_change(events: list[WatchEvent]) -> None:
+        for e in events:
+            print(f"  {e}")
+        print("Rebuilding …")
+        manifest = scan_directory(args.path)
+        opt_summary = optimize(manifest, config)
+        result = pack(opt_summary, config)
+        report = BuildReport(opt_summary, result)
+        print(report.to_json())
+
+    try:
+        watch(args.path, on_change, interval=args.interval)
+    except KeyboardInterrupt:
+        print("\nWatcher stopped.")
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "scan":
-        sys.exit(cmd_scan(args))
+        cmd_scan(args)
     elif args.command == "build":
-        sys.exit(cmd_build(args))
+        cmd_build(args)
+    elif args.command == "watch":
+        cmd_watch(args)
     else:
         parser.print_help()
-        sys.exit(0)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
