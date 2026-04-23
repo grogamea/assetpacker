@@ -56,3 +56,11 @@ def test_merge_desktop_profile(empty_config):
     result = merge_profile_into_config(profile, empty_config)
     assert result.pack_format == "folder"
     assert result.compress is False
+
+
+def test_describe_merge_returns_all_config_keys(web_profile, empty_config):
+    """Ensure describe_merge covers every key present in the merged result."""
+    result = merge_profile_into_config(web_profile, empty_config)
+    sources = describe_merge(web_profile, empty_config)
+    for key in vars(result):
+        assert key in sources, f"describe_merge is missing key: {key!r}"
