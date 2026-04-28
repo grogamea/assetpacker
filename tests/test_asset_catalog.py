@@ -53,6 +53,12 @@ def test_catalog_by_category_audio(catalog):
     assert audio[0].suffix == ".ogg"
 
 
+def test_catalog_by_category_unknown(catalog):
+    """by_category with an unknown category name should return an empty list."""
+    result = catalog.by_category("nonexistent_category")
+    assert result == []
+
+
 def test_catalog_by_suffix(catalog):
     pngs = catalog.by_suffix(".png")
     assert len(pngs) == 1
